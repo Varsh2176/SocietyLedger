@@ -30,9 +30,11 @@ const {
 const { connectDB, disconnectDB } = require('./config/db');
 const { recalculateFundBalance } = require('./services/fundService');
 
-const seedDatabase = async () => {
+const seedDatabase = async (shouldDisconnect = false) => {
   console.log('[Seed] Starting SocietyLedger database seeding...');
-  await connectDB();
+  if (mongoose.connection.readyState !== 1) {
+    await connectDB();
+  }
 
   // Clean existing collections
   await Promise.all([
@@ -836,12 +838,14 @@ const seedDatabase = async () => {
   await recalculateFundBalance(primarySociety._id, solarFund._id);
 
   console.log('[Seed] Database successfully seeded with synchronized financial records!');
-  await disconnectDB();
+  if (shouldDisconnect) {
+    await disconnectDB();
+  }
 };
 
 // Execute if run directly
 if (require.main === module) {
-  seedDatabase()
+  seedDatabase(true)
     .then(() => {
       console.log('[Seed] Seeding completed.');
       process.exit(0);
