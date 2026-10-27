@@ -1,0 +1,29 @@
+{
+  "name": "society-ledger",
+  "version": "1.0.0",
+  "description": "SocietyLedger — Full-Stack Apartment Society Financial Governance & Transparency Platform",
+  "main": "src/models/index.js",
+  "scripts": {
+    "test": "node --test tests/**/*.test.js",
+    "seed": "node src/seeds/seedRunner.js",
+    "seed:dry-run": "node src/seeds/seedRunner.js --dry-run",
+    "seed:reset": "node src/seeds/seedRunner.js --reset",
+    "seed:verify": "node src/seeds/verifySeed.js"
+  },
+  "keywords": [
+    "society",
+    "financial-governance",
+    "transparency",
+    "mern",
+    "mongodb",
+    "mongoose",
+    "compliance"
+  ],
+  "author": "SocietyLedger Team (Person 3: Database & Compliance Engineer)",
+  "license": "ISC",
+  "dependencies": {
+    "bcryptjs": "^3.0.3",
+    "dotenv": "^18.0.9",
+    "mongoose": "^9.11.4"
+  }
+}
