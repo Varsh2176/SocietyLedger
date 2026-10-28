@@ -1,7 +1,9 @@
+
 const { AuditLog, AuditObservation } = require('../models');
 
 /**
- * Creates an immutable audit log entry for important financial & governance actions.
+ * Creates an audit log entry for financial and governance actions.
+ * Audit failures are propagated to the caller.
  */
 const logAction = async ({
   societyId,
@@ -23,15 +25,19 @@ const logAction = async ({
       details,
       timestamp: new Date(),
     });
+
     return log;
   } catch (error) {
-    console.error('[Audit Log Error] Failed to write audit record:', error.message);
-    return null;
+    console.error(
+      '[Audit Log Error] Failed to write audit record:',
+      error.message
+    );
+    throw error;
   }
 };
 
 /**
- * Retrieves audit logs with optional filtering and pagination
+ * Retrieves audit logs with filtering and pagination.
  */
 const getAuditLogs = async (societyId, params = {}) => {
   const {
@@ -44,30 +50,92 @@ const getAuditLogs = async (societyId, params = {}) => {
     endDate,
   } = params;
 
+  const pageNumber = Number(page);
+  const pageSize = Number(limit);
+
+  if (
+    !Number.isInteger(pageNumber) ||
+    pageNumber < 1 ||
+    !Number.isInteger(pageSize) ||
+    pageSize < 1 ||
+    pageSize > 100
+  ) {
+    const error = new Error(
+      'Page must be positive and limit must be between 1 and 100.'
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
   const query = { societyId };
 
   if (action && action !== 'ALL') {
     query.action = action;
   }
+
   if (entityType && entityType !== 'ALL') {
     query.entityType = entityType;
   }
+
   if (startDate || endDate) {
     query.timestamp = {};
-    if (startDate) query.timestamp.$gte = new Date(startDate);
-    if (endDate) query.timestamp.$lte = new Date(endDate);
+
+    if (startDate) {
+      const start = new Date(startDate);
+
+      if (Number.isNaN(start.getTime())) {
+        const error = new Error('Invalid start date.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      query.timestamp.$gte = start;
+    }
+
+    if (endDate) {
+      const end = new Date(endDate);
+
+      if (Number.isNaN(end.getTime())) {
+        const error = new Error('Invalid end date.');
+        error.statusCode = 400;
+        throw error;
+      }
+
+      query.timestamp.$lte = end;
+    }
+
+    if (
+      query.timestamp.$gte &&
+      query.timestamp.$lte &&
+      query.timestamp.$gte > query.timestamp.$lte
+    ) {
+      const error = new Error(
+        'Start date cannot be later than end date.'
+      );
+      error.statusCode = 400;
+      throw error;
+    }
   }
-  if (search) {
+
+  if (search && String(search).trim()) {
+    const escapedSearch = String(search)
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
     query.$or = [
-      { details: { $regex: search, $options: 'i' } },
-      { entityRef: { $regex: search, $options: 'i' } },
-      { actor: { $regex: search, $options: 'i' } },
+      { details: { $regex: escapedSearch, $options: 'i' } },
+      { entityRef: { $regex: escapedSearch, $options: 'i' } },
+      { actor: { $regex: escapedSearch, $options: 'i' } },
     ];
   }
 
-  const skip = (Number(page) - 1) * Number(limit);
+  const skip = (pageNumber - 1) * pageSize;
+
   const [logs, total] = await Promise.all([
-    AuditLog.find(query).sort({ timestamp: -1 }).skip(skip).limit(Number(limit)),
+    AuditLog.find(query)
+      .sort({ timestamp: -1 })
+      .skip(skip)
+      .limit(pageSize),
     AuditLog.countDocuments(query),
   ]);
 
@@ -75,15 +143,15 @@ const getAuditLogs = async (societyId, params = {}) => {
     logs,
     meta: {
       total,
-      page: Number(page),
-      limit: Number(limit),
-      totalPages: Math.ceil(total / Number(limit)) || 1,
+      page: pageNumber,
+      limit: pageSize,
+      totalPages: Math.ceil(total / pageSize),
     },
   };
 };
 
 /**
- * Retrieves audit observations
+ * Retrieves audit observations for a society.
  */
 const getObservations = async (societyId, params = {}) => {
   const { severity, status, search } = params;
@@ -92,34 +160,56 @@ const getObservations = async (societyId, params = {}) => {
   if (severity && severity !== 'ALL') {
     query.severity = severity;
   }
+
   if (status && status !== 'ALL') {
     query.status = status;
   }
-  if (search) {
+
+  if (search && String(search).trim()) {
+    const escapedSearch = String(search)
+      .trim()
+      .replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
     query.$or = [
-      { title: { $regex: search, $options: 'i' } },
-      { observation: { $regex: search, $options: 'i' } },
-      { relatedEntity: { $regex: search, $options: 'i' } },
+      { title: { $regex: escapedSearch, $options: 'i' } },
+      { observation: { $regex: escapedSearch, $options: 'i' } },
+      { relatedEntity: { $regex: escapedSearch, $options: 'i' } },
     ];
   }
 
-  const observations = await AuditObservation.find(query).sort({ date: -1, createdAt: -1 });
-  return observations;
+  return AuditObservation.find(query).sort({
+    date: -1,
+    createdAt: -1,
+  });
 };
 
 /**
- * Creates a new audit observation
+ * Creates a new audit observation.
  */
-const createObservation = async (societyId, data) => {
+const createObservation = async (societyId, data = {}) => {
+  if (
+    !data.title ||
+    !String(data.title).trim() ||
+    !data.severity ||
+    !data.observation ||
+    !String(data.observation).trim()
+  ) {
+    const error = new Error(
+      'Title, severity, and observation are required.'
+    );
+    error.statusCode = 400;
+    throw error;
+  }
+
   const observation = await AuditObservation.create({
     societyId,
-    title: data.title,
+    title: String(data.title).trim(),
     severity: data.severity,
     status: data.status || 'OPEN',
     date: data.date || new Date().toISOString().split('T')[0],
     relatedEntity: data.relatedEntity,
     assignedTo: data.assignedTo,
-    observation: data.observation,
+    observation: String(data.observation).trim(),
     correctiveAction: data.correctiveAction || '',
     evidenceDocument: data.evidenceDocument || null,
     isWarningOnly: Boolean(data.isWarningOnly),
@@ -129,21 +219,40 @@ const createObservation = async (societyId, data) => {
 };
 
 /**
- * Updates an audit observation (e.g., status or corrective action)
+ * Updates an audit observation belonging to the specified society.
  */
-const updateObservation = async (societyId, id, updateData) => {
-  const observation = await AuditObservation.findOne({ _id: id, societyId });
+const updateObservation = async (societyId, id, updateData = {}) => {
+  if (!id) {
+    const error = new Error('Observation ID is required.');
+    error.statusCode = 400;
+    throw error;
+  }
+
+  const observation = await AuditObservation.findOne({
+    _id: id,
+    societyId,
+  });
+
   if (!observation) {
     const error = new Error('Audit observation record not found.');
     error.statusCode = 404;
     throw error;
   }
 
-  if (updateData.status) observation.status = updateData.status;
-  if (updateData.correctiveAction !== undefined) observation.correctiveAction = updateData.correctiveAction;
-  if (updateData.assignedTo) observation.assignedTo = updateData.assignedTo;
+  if (updateData.status !== undefined) {
+    observation.status = updateData.status;
+  }
+
+  if (updateData.correctiveAction !== undefined) {
+    observation.correctiveAction = updateData.correctiveAction;
+  }
+
+  if (updateData.assignedTo !== undefined) {
+    observation.assignedTo = updateData.assignedTo;
+  }
 
   await observation.save();
+
   return observation;
 };
 

@@ -1,52 +1,75 @@
+
 const eventService = require('../services/eventService');
 
-const getEvents = async (req, res, next) => {
-  try {
-    const events = await eventService.getEvents(req.societyId, req.query);
+const handle = (action, successMessage, statusCode = 200) =>
+  async (req, res, next) => {
+    try {
+      const result = await action(req);
+      res.status(statusCode).json({
+        success: true,
+        message: successMessage,
+        data: result,
+      });
+    } catch (error) {
+      next(error);
+    }
+  };
 
-    res.status(200).json({
-      success: true,
-      message: 'Events retrieved successfully.',
-      data: {
-        events,
-      },
-      events,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+const getEvents = handle(
+  (req) => eventService.getEvents(req.societyId, req.query),
+  'Events retrieved successfully.'
+);
 
-const getEventById = async (req, res, next) => {
-  try {
-    const event = await eventService.getEventById(req.societyId, req.params.id);
+const getEventById = handle(
+  (req) => eventService.getEventById(req.societyId, req.params.id),
+  'Event details retrieved successfully.'
+);
 
-    res.status(200).json({
-      success: true,
-      message: 'Event details retrieved successfully.',
-      data: event,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+const createProposal = handle(
+  (req) => eventService.createProposal(req.societyId, req.body, req.user),
+  'Event proposal created successfully.',
+  201
+);
 
-const createProposal = async (req, res, next) => {
-  try {
-    const event = await eventService.createProposal(req.societyId, req.body, req.user);
+const approveProposal = handle(
+  (req) => eventService.approveProposal(req.societyId, req.params.id, req.body, req.user),
+  'Event proposal approved successfully.'
+);
 
-    res.status(201).json({
-      success: true,
-      message: 'Event proposal created successfully.',
-      data: event,
-    });
-  } catch (error) {
-    next(error);
-  }
-};
+const rejectProposal = handle(
+  (req) => eventService.rejectProposal(
+    req.societyId, req.params.id, req.body?.reason, req.user
+  ),
+  'Event proposal rejected.'
+);
+
+const selectVendor = handle(
+  (req) => eventService.selectVendor(
+    req.societyId, req.params.id, req.body?.quotationId, req.user
+  ),
+  'Event vendor selected successfully.'
+);
+
+const recordInvoice = handle(
+  (req) => eventService.recordInvoice(req.societyId, req.params.id, req.body, req.user),
+  'Event invoice recorded successfully.',
+  201
+);
+
+const settleEvent = handle(
+  (req) => eventService.settleEvent(
+    req.societyId, req.params.id, req.body?.notes, req.user
+  ),
+  'Event settled successfully.'
+);
 
 module.exports = {
   getEvents,
   getEventById,
   createProposal,
+  approveProposal,
+  rejectProposal,
+  selectVendor,
+  recordInvoice,
+  settleEvent,
 };
